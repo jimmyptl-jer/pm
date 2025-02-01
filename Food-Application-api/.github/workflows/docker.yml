@@ -1,0 +1,59 @@
+name: Scan and Push Docker Images
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  docker-registry-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Docker Hub Login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Install and Run Docker Bench Security
+        run: |
+          git clone https://github.com/docker/docker-bench-security.git
+          cd docker-bench-security
+          sudo sh docker-bench-security.sh > docker-bench-report.txt
+          cat docker-bench-report.txt
+        continue-on-error: true
+
+      - name: Upload Docker Bench Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: docker-bench-report
+          path: docker-bench-security/docker-bench-report.txt
+
+      - name: Get GitHub Actions Run Number for Versioning
+        id: run_number
+        run: echo "RUN_NUMBER=${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64
+          tags: ${{ secrets.DOCKER_USERNAME }}/food-app-api:${{env.RUN_NUMBER}}
+          push: false
+
+      - name: Scan Server Docker Image for Vulnerabilities
+        uses: anchore/scan-action@v3
+        with:
+          image: ${{ secrets.DOCKER_USERNAME }}/food-app-api:${{env.RUN_NUMBER}}
+          fail-build: false
+          output-format: sarif
+
+      - name: Push Server Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64
+          tags: ${{ secrets.DOCKER_USERNAME }}/food-app-api:${{env.RUN_NUMBER}}
+          push: true
